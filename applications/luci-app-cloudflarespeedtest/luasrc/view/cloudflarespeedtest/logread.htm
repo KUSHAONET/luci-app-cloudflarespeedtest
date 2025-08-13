@@ -3,20 +3,68 @@
 <textarea id="logview" class="cbi-input-textarea" style="width: 100%" rows="30" readonly="readonly"></textarea>
 
 <script type="text/javascript">
+    // 后端获取日志的URL
     const LOG_URL = '<%=luci.dispatcher.build_url("admin", "services", "cloudflarespeedtest","getlog")%>';
-    
-    function getlog(){
-        XHR.get(LOG_URL, null, function(x, data) {            
-             logview.value = data.log;   
-             if(document.getElementById("checkbox1").checked == true){
-                logview.scrollTop = logview.scrollHeight;
-             }     
+    const logview = document.getElementById('logview');
+
+    /**
+     * 格式化原始日志字符串的函数
+     * @param {string} rawLog - 从后端获取的、未经处理的日志文本
+     * @returns {string} - 格式化后的、适合在textarea中显示的文本
+     */
+    function formatLog(rawLog) {
+        if (!rawLog) {
+            return '';
+        }
+
+        // 步骤 1: 移除所有ANSI转义序列（用于控制颜色、光标等），净化日志。
+        let cleanLog = rawLog。replace(/\x1b\[[0-9;]*[mGKH]/g, '');
+
+        // 步骤 2: 【核心】展开进度条长行。
+        // 这个正则表达式匹配一个或多个空格，后跟 "数字 / 数字 [" 的模式。
+        // 它会在每个进度条片段前插入一个换行符，同时移除用于分隔的多余空格。
+        let unrolledLog = cleanLog.replace(/\s+(\d+\s\/\s\d+\s\[)/g, '\n$1');
+
+        // 步骤 3: 利用现有的和新插入的换行符，将整个字符串分割成行数组。
+        const lines = unrolledLog.split('\n');
+
+        // 步骤 4: 处理行数组，进行清理和规范化。
+        const formattedLines = lines
+            .map(line => line.trim())      // 对每一行，去除其首尾的空白字符。
+            .filter(line => line.length > 0); // 过滤掉所有空行（即长度为0的行）。
+
+        // 步骤 5: 将清理过的行数组用单个换行符重新组合成最终的字符串。
+        return formattedLines.join('\n');
+    }
+
+    /**
+     * 获取并显示日志的函数
+     */
+    function getlog() {
+        XHR.get(LOG_URL, null, function (x, data) {
+            // 确保后端返回了数据且data.log存在
+            if (data && typeof data.log === 'string') {
+                // 将从后端获取的原始日志，先经过 formatLog 函数处理
+                const formattedText = formatLog(data.log);
+
+                // 再将处理后的文本赋值给 textarea
+                logview.value = formattedText;
+
+                // 如果启用了自动刷新，则滚动到底部
+                if (document.getElementById("checkbox1").checked == true) {
+                    logview.scrollTop = logview.scrollHeight;
+                }
+            }
         });
     }
-    getlog()
-    setInterval(() => { 
-        if(document.getElementById("checkbox1").checked == true){
-            getlog()
+
+    // 页面加载时首次获取日志
+    getlog();
+
+    // 设置定时器，每2秒钟在“自动刷新”开启时获取一次日志
+    setInterval(() => {
+        if (document.getElementById("checkbox1").checked == true) {
+            getlog();
         }
     }, 2000);
 </script>
