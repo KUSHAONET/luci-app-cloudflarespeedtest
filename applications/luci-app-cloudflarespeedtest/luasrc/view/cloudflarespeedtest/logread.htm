@@ -17,23 +17,29 @@
             return '';
         }
 
-        // 步骤 1: 移除所有ANSI转义序列（用于控制颜色、光标等），净化日志。
-        let cleanLog = rawLog。replace(/\x1b\[[0-9;]*[mGKH]/g, '');
+        // 步骤 1: 【核心修正】在进度条结尾和表格标题之间强行插入换行符
+        // 正则表达式匹配：(一个闭合方括号后面跟着一串空白符) 和 (一个ANSI颜色代码后面跟着'IP 地址')
+        // 然后用一个换行符替换它们之间的空白符。
+        let logWithHeaderFix = rawLog.replace(/(]\s+)(\x1b\[\d+mIP 地址)/g, ']\n$2');
 
-        // 步骤 2: 【核心】展开进度条长行。
-        // 这个正则表达式匹配一个或多个空格，后跟 "数字 / 数字 [" 的模式。
-        // 它会在每个进度条片段前插入一个换行符，同时移除用于分隔的多余空格。
-        let unrolledLog = cleanLog.replace(/\s+(\d+\s\/\s\d+\s\[)/g, '\n$1');
+        // 步骤 2: 清理所有ANSI转义序列，净化日志。
+        let cleanLog = logWithHeaderFix.replace(/\x1b\[[0-9;]*[mGKH]/g, '');
 
-        // 步骤 3: 利用现有的和新插入的换行符，将整个字符串分割成行数组。
-        const lines = unrolledLog.split('\n');
+        // 步骤 3: 统一所有类型的换行符为 \n，为下一步的拆分做准备。
+        let normalizedLog = cleanLog.替换(/\r\n?|\r/g， '\n');
+        
+        // 步骤 4: 展开仍然在一行内的其他进度条片段。
+        normalizedLog = normalizedLog。替换(/(\d+\s\/\s\d+\s\[)/g， '\n$1');
 
-        // 步骤 4: 处理行数组，进行清理和规范化。
+        // 步骤 5: 将处理过的字符串分割成行数组。
+        const lines = normalizedLog.split('\n');
+
+        // 步骤 6: 处理行数组，进行清理和规范化。
         const formattedLines = lines
             .map(line => line.trim())      // 对每一行，去除其首尾的空白字符。
-            .filter(line => line.length > 0); // 过滤掉所有空行（即长度为0的行）。
+            。filter(line => line.length > 0); // 过滤掉所有可能产生的空行。
 
-        // 步骤 5: 将清理过的行数组用单个换行符重新组合成最终的字符串。
+        // 步骤 7: 将清理过的行数组用单个换行符重新组合成最终的字符串。
         return formattedLines.join('\n');
     }
 
@@ -41,16 +47,12 @@
      * 获取并显示日志的函数
      */
     function getlog() {
-        XHR.get(LOG_URL, null, function (x, data) {
+        XHR.get(LOG_URL, null, function(x, data) {
             // 确保后端返回了数据且data.log存在
             if (data && typeof data.log === 'string') {
-                // 将从后端获取的原始日志，先经过 formatLog 函数处理
                 const formattedText = formatLog(data.log);
-
-                // 再将处理后的文本赋值给 textarea
-                logview.value = formattedText;
-
-                // 如果启用了自动刷新，则滚动到底部
+                logview。value = formattedText;
+                
                 if (document.getElementById("checkbox1").checked == true) {
                     logview.scrollTop = logview.scrollHeight;
                 }
