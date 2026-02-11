@@ -1,6 +1,8 @@
 <%+cbi/valueheader%>
-<input type="checkbox" id="checkbox1" checked><%:Auto refresh%></input>
-<textarea id="logview" class="cbi-input-textarea" style="width: 100%" rows="30" readonly="readonly"></textarea>
+<input type="checkbox" id="checkbox1" checked><%:自动刷新%></input>
+<textarea id="logview" class="cbi-input-textarea" 
+    style="width: 100%; font-family: 'Courier New', monospace; white-space: pre-wrap; word-break: break-all; background-color: #1e1e1e; color: #d4d4d4; padding: 10px; border-radius: 4px; line-height: 1.4;" 
+    rows="50" readonly="readonly"></textarea>
 
 <script type="text/javascript">
     // 后端获取日志的URL
@@ -9,63 +11,70 @@
 
     /**
      * 格式化原始日志字符串的函数
-     * @param {string} rawLog - 从后端获取的、未经处理的日志文本
-     * @returns {string} - 格式化后的、适合在textarea中显示的文本
      */
     function formatLog(rawLog) {
         if (!rawLog) {
-            return '';
+            return '【系统提示】正在等待日志生成...';
         }
 
-        // 步骤 1: 【核心修正】在进度条结尾和表格标题之间强行插入换行符
-        // 正则表达式匹配：(一个闭合方括号后面跟着一串空白符) 和 (一个ANSI颜色代码后面跟着'IP 地址')
-        // 然后用一个换行符替换它们之间的空白符。
-        let logWithHeaderFix = rawLog.replace(/(]\s+)(\x1b\[\d+mIP 地址)/g, ']\n$2');
+        let formatted = rawLog;
 
-        // 步骤 2: 清理所有ANSI转义序列，净化日志。
-        let cleanLog = logWithHeaderFix.replace(/\x1b\[[0-9;]*[mGKH]/g, '');
+        // 1. 在“开始下载测速”前强制换行
+        formatted = formatted.replace(/([^\n])(\s*(\x1b\[\d+m)?开始下载测速)/g, '$1\n$2');
 
-        // 步骤 3: 统一所有类型的换行符为 \n，为下一步的拆分做准备。
-        let normalizedLog = cleanLog.替换(/\r\n?|\r/g， '\n');
-        
-        // 步骤 4: 展开仍然在一行内的其他进度条片段。
-        normalizedLog = normalizedLog。替换(/(\d+\s\/\s\d+\s\[)/g， '\n$1');
+        // 2. 在测速结果表格标题“IP 地址”前强制换行
+        formatted = formatted.replace(/([^\n])(\s*(\x1b\[\d+m)?IP 地址)/g, '$1\n$2');
 
-        // 步骤 5: 将处理过的字符串分割成行数组。
-        const lines = normalizedLog.split('\n');
+        // 3. 处理进度条：在每一个新的进度更新点前插入换行符
+        formatted = formatted.replace(/(\d+\s\/\s\d+\s\[)/g, '\n$1');
 
-        // 步骤 6: 处理行数组，进行清理和规范化。
-        const formattedLines = lines
-            .map(line => line.trim())      // 对每一行，去除其首尾的空白字符。
-            。filter(line => line.length > 0); // 过滤掉所有可能产生的空行。
+        // 4. 清理所有 ANSI 转义序列
+        formatted = formatted.replace(/\x1b\[[0-9;]*[mGKH]/g, '');
 
-        // 步骤 7: 将清理过的行数组用单个换行符重新组合成最终的字符串。
-        return formattedLines.join('\n');
+        // 5. 统一处理换行符并分割成行数组
+        const lines = formatted.split(/\r?\n/);
+
+        // 6. 清理每行多余空格并过滤空行
+        const processedLines = lines
+            .map(line => line.trim())
+            .filter(line => line.length > 0);
+
+        // 7. 性能保护：防止日志堆积过大
+        if (processedLines.length > 5000) {
+            return "......（日志过长，已自动截取末尾部分）......\n" + processedLines.slice(-5000).join('\n');
+        }
+
+        return processedLines.join('\n');
     }
 
     /**
-     * 获取并显示日志的函数
+     * 执行 XHR 请求获取日志
      */
     function getlog() {
         XHR.get(LOG_URL, null, function(x, data) {
-            // 确保后端返回了数据且data.log存在
             if (data && typeof data.log === 'string') {
-                const formattedText = formatLog(data.log);
-                logview。value = formattedText;
+                const cleanText = formatLog(data.log);
                 
-                if (document.getElementById("checkbox1").checked == true) {
-                    logview.scrollTop = logview.scrollHeight;
+                if (logview.value !== cleanText) {
+                    logview.value = cleanText;
+                    
+                    // 自动滚动到底部
+                    if (document.getElementById("checkbox1").checked) {
+                        logview.scrollTop = logview.scrollHeight;
+                    }
                 }
+            } else if (data && data.running === false && (!data.log || data.log === "")) {
+                logview.value = "【系统提示】测速任务未运行。";
             }
         });
     }
 
-    // 页面加载时首次获取日志
+    // 初始加载
     getlog();
 
-    // 设置定时器，每2秒钟在“自动刷新”开启时获取一次日志
+    // 定时刷新
     setInterval(() => {
-        if (document.getElementById("checkbox1").checked == true) {
+        if (document.getElementById("checkbox1").checked === true) {
             getlog();
         }
     }, 2000);
