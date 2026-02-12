@@ -319,21 +319,65 @@ o=s:taboption("mosdns", Flag, "MosDNS_enabled",translate("MosDNS Enabled"))
 o=s:taboption("mosdns", Flag, "openclash_restart",translate("OpenClash Restart"))
 o:depends("MosDNS_enabled", 1)
 
-e=m:section(TypedSection,"global",translate("Best IP"))
-e.anonymous=true
-local a="/usr/share/cloudflarespeedtestresult.txt"
-tvIPs=e:option(TextValue,"syipstext")
-tvIPs.rows=8
-tvIPs.readonly="readonly"
-tvIPs.wrap="off"
+-- [[ 最佳 IP 显示部分 ]] --
+e = m:section(TypedSection, "global", translate("Best IP"))
+e.anonymous = true
 
-function tvIPs.cfgvalue(e,e)
-	sylogtext=""
-	if a and nixio.fs.access(a) then
-		sylogtext=luci.sys.exec("tail -n 100 %s"%a)
-	end
-	return sylogtext
+-- 使用 DummyValue 来承载 HTML 内容
+tvIPs = e:option(DummyValue, "syipstext")
+tvIPs.rawhtml = true
+
+function tvIPs.cfgvalue(self, section)
+    local file_path = "/usr/share/cloudflarespeedtestresult.txt"
+    local html = ""
+    
+    -- 尝试打开结果文件
+    local f = io.open(file_path, "r")
+    if f then
+        -- 读取第一行（标题行）
+        local header = f:read("*l")
+        if header then
+            -- 构建表格样式和头部
+            html = [[
+<div style="overflow-x:auto; background-color: #f9f9f9; padding: 10px; border-radius: 4px; border: 1px solid #ddd;">
+    <table class="cbi-section-table" style="width:100%; margin:0; font-size:12px; text-align:center; border-collapse: collapse;">
+        <tr class="cbi-section-table-titles" style="background-color: #eee; height: 30px;">
+]]
+            -- 解析标题 (CSV 逗号分隔)
+            for col in header:gmatch("([^,]+)") do
+                html = html .. string.format('<th class="cbi-section-table-cell" style="padding: 4px 8px; border-bottom: 2px solid #ccc;">%s</th>', luci.util.pcdata(col))
+            end
+            html = html .. "</tr>"
+
+            -- 读取数据行（最多显示前 10 条最佳结果，防止页面过长）
+            local count = 0
+            for line in f:lines() do
+                if count >= 10 then break end
+                html = html .. '<tr class="cbi-section-table-row" style="height: 28px; border-bottom: 1px solid #eee;">'
+                
+                -- 解析每一列数据
+                for col in line:gmatch("([^,]+)") do
+                    -- 针对 IP 地址列做换行处理，防止 IPv6 撑开表格
+                    local style = (col:find(":") or #col > 16) and 'style="word-break: break-all; min-width: 120px;"' or ""
+                    html = html .. string.format('<td class="cbi-section-table-cell" %s>%s</td>', style, luci.util.pcdata(col))
+                end
+                
+                html = html .. "</tr>"
+                count = count + 1
+            end
+            html = html .. "</table></div>"
+        else
+            html = "<em>" .. translate("等待测速结果生成...") .. "</em>"
+        end
+        f:close()
+    else
+        html = "<em>" .. translate("尚未发现测速结果文件。") .. "</em>"
+    end
+    
+    -- 添加一个自动刷新提示或最后更新时间（可选）
+    return html
 end
+
 tvIPs.write=function(e,e,e)
 end
 
