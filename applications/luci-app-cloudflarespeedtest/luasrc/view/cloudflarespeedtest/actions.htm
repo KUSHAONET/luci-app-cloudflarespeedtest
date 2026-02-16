@@ -1,4 +1,104 @@
 <%+cbi/valueheader%>
+<style>
+    /* 1. 核心动画：旋转与呼吸灯 */
+    @keyframes cf-rotate {
+        from { transform: rotate(0deg); }
+        to { transform: rotate(360deg); }
+    }
+    @keyframes cf-pulse {
+        0% { opacity: 1; }
+        50% { opacity: 0.4; }
+        100% { opacity: 1; }
+    }
+
+    /* 2. 布局修复：强制标签与内容在同一行水平对齐 */
+    .cf-status-row {
+        display: flex !important;
+        flex-direction: row !important;
+        align-items: center !important;
+        flex-wrap: nowrap !important;
+        min-height: 40px !important;
+    }
+
+    /* 标签固定宽度，并取消浮动 */
+    .cf-status-row .cbi-value-title {
+        flex: 0 0 100px !important;
+        width: 100px !important;
+        margin: 0 !important;
+        padding-right: 15px !important;
+        text-align: right !important;
+        float: none !important;
+        font-weight: bold;
+        color: #4b5563;
+    }
+
+    /* 内容区域：图标、文字、按钮紧凑排布 */
+    .cf-status-row .cbi-value-field {
+        flex: 1 !important;
+        display: flex !important;
+        align-items: center !important;
+        margin: 0 !important;
+        padding: 0 !important;
+        float: none !important;
+    }
+
+    /* 3. 状态图标样式 */
+    .status-icon {
+        display: inline-block;
+        width: 14px;
+        height: 14px;
+        margin-right: 8px;
+        border-radius: 50%;
+        flex-shrink: 0;
+    }
+    .status-icon.running {
+        border: 2px solid #3b82f6;
+        border-top-color: transparent;
+        animation: cf-rotate 1s linear infinite;
+    }
+    .status-icon.stopped {
+        background-color: #94a3b8;
+        border: 2px solid #e2e8f0;
+    }
+
+    /* 4. 状态文字与按钮 */
+    #cloudflarespeedtest_status {
+        margin: 0 20px 0 0 !important;
+        padding: 0 !important;
+        font-size: 14px;
+        font-weight: 600;
+        display: flex;
+        align-items: center;
+        white-space: nowrap;
+    }
+
+    .cf-btn {
+        height: 28px !important;
+        line-height: 28px !important;
+        padding: 0 15px !important;
+        border-radius: 6px !important;
+        font-size: 12px !important;
+        font-weight: 600 !important;
+        cursor: pointer;
+        transition: all 0.2s;
+        border: none !important;
+        white-space: nowrap;
+    }
+    .cf-btn-start {
+        background-color: #3b82f6 !important;
+        color: #fff !important;
+        box-shadow: 0 2px 4px rgba(59, 130, 246, 0.3);
+    }
+    .cf-btn-start:hover {
+        background-color: #2563eb !important;
+        transform: translateY(-1px);
+    }
+    .cf-btn-stop {
+        background-color: #ef4444 !important;
+        color: #fff !important;
+    }
+</style>
+
 <script type="text/javascript">//<![CDATA[
     const STATUS_URL = '<%=luci.dispatcher.build_url("admin", "services", "cloudflarespeedtest","status")%>';
     const RUN_URL = '<%=luci.dispatcher.build_url("admin", "services", "cloudflarespeedtest","start")%>';
@@ -8,49 +108,54 @@
     XHR.poll(3, STATUS_URL, null,
         function(x, data) {
             var tb = document.getElementById('cloudflarespeedtest_status');        
-          
             if (data && tb) {
                 if (data.running) {
-                    buttonStatus(true)          
-                    tb.innerHTML = '<em><b><font color=green><%:RUNNING %></font></b></em>';
+                    buttonStatus(true);          
+                    tb.innerHTML = '<span class="status-icon running"></span><span style="color: #3b82f6;"><%:运行中%></span>';
                 } else {
-                    buttonStatus(false)  
-                    tb.innerHTML = '<em><b><font color=red> <%:NOT RUNNING %></font></b></em>';
+                    buttonStatus(false);  
+                    tb.innerHTML = '<span class="status-icon stopped"></span><span style="color: #64748b;"><%:未运行%></span>';
                 }
             }
         }
     );
 
-	function cloudflarespeedtest_act_start() {
-        buttonStatus(true)
-		XHR.get(RUN_URL, null, () => {          
-        });
-        setTimeout(() => { window.location = LOG_URL }, 500);
-        return false;	
-	}
+    function cloudflarespeedtest_act_start() {
+        buttonStatus(true);
+        var tb = document.getElementById('cloudflarespeedtest_status');
+        if (tb) tb.innerHTML = '<span class="status-icon running"></span><span style="color: #3b82f6;"><%:正在启动...%></span>';
+        XHR.get(RUN_URL, null, () => {});
+        setTimeout(() => { window.location = LOG_URL }, 800);
+        return false;   
+    }
 
     function cloudflarespeedtest_act_stop(){
-        XHR.get(STOP_URL, null, () => {    
-            buttonStatus(false)      
-        });
-        return false;	
+        XHR.get(STOP_URL, null, () => { buttonStatus(false); });
+        return false;   
     }
 
     function buttonStatus(running){
-        document.getElementById('cloudflarespeedtest_start').style.display  =  running ? "none" : "block"
-        document.getElementById('cloudflarespeedtest_stop').style.display   =  running ? "block" : "none"
+        var startBtn = document.getElementById('cloudflarespeedtest_start');
+        var stopBtn = document.getElementById('cloudflarespeedtest_stop');
+        if(startBtn) startBtn.style.display = running ? "none" : "block";
+        if(stopBtn) stopBtn.style.display = running ? "block" : "none";
     }
-    
 //]]></script>
-<label class="cbi-value-title"><%= translate("Status") %></label>
-<div class="cbi-value-field">
-    <p id="cloudflarespeedtest_status"><em><%:Collecting data...%></em></p>
-</div>
 
-<label class="cbi-value-title"><%= translate("Speed Test") %></label>
-<div class="cbi-value-field">
-    <input id="cloudflarespeedtest_start" type="button" style="display:block;" class="btn cbi-button cbi-button-apply" value="<%= translate('TEST AND APPLY') %>" onclick="cloudflarespeedtest_act_start()" />
-	<input id="cloudflarespeedtest_stop" type="button" style="display:none;" class="btn cbi-button cbi-button-apply" value="<%= translate('STOP') %>" onclick="cloudflarespeedtest_act_stop()" />
+<div class="cbi-value cf-status-row">
+    <label class="cbi-value-title"><%= translate("Status") %></label>
+    <div class="cbi-value-field">
+        <p id="cloudflarespeedtest_status">
+            <span class="status-icon stopped" style="animation: cf-pulse 1.5s infinite;"></span>
+            <em style="color: #94a3b8;"><%:正在获取状态...%></em>
+        </p>
+
+        <input id="cloudflarespeedtest_start" type="button" class="cf-btn cf-btn-start" 
+               value="<%= translate('TEST AND APPLY') %>" onclick="cloudflarespeedtest_act_start()" />
+        
+        <input id="cloudflarespeedtest_stop" type="button" class="cf-btn cf-btn-stop" 
+               style="display:none;" value="<%= translate('STOP') %>" onclick="cloudflarespeedtest_act_stop()" />
+    </div>
 </div>
 
 <%+cbi/valuefooter%>
