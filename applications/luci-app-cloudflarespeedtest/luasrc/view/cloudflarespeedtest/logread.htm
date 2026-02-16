@@ -1,65 +1,207 @@
 <%+cbi/valueheader%>
-<input type="checkbox" id="checkbox1" checked><%:自动刷新%></input>
-<textarea id="logview" class="cbi-input-textarea" 
-    style="width: 100%; font-family: 'Courier New', monospace; white-space: pre-wrap; word-break: break-all; background-color: #1e1e1e; color: #d4d4d4; padding: 10px; border-radius: 4px; line-height: 1.4;" 
-    rows="40" readonly="readonly"></textarea>
+
+<style>
+    /* 1. 仪表盘看板容器：动态背景过渡 */
+    .cf-log-dashboard {
+        width: 100%;
+        background-color: #1a1a1a; 
+        border-radius: 12px;
+        border: 1px solid #e2e8f0;
+        border-bottom: 4px solid #3b82f6 !important;
+        overflow: hidden;
+        box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+        margin: 10px 0 20px 0;
+        transition: background-color 0.4s ease;
+    }
+
+    .cf-log-dashboard.active-refresh {
+        background-color: #1b222d; 
+    }
+
+    /* 2. 看板头部 */
+    .cf-log-header {
+        background: #3b82f6;
+        color: #ffffff;
+        padding: 8px 16px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    }
+
+    .cf-log-title {
+        font-weight: bold;
+        font-size: 16px; 
+        display: flex;
+        align-items: center;
+        letter-spacing: 1px;
+    }
+    .cf-log-title::before {
+        content: "📑";
+        margin-right: 10px;
+        font-size: 18px;
+    }
+
+    /* 3. 复选框对齐终极方案：使用 Flex 居中 + 像素微调 */
+    .cf-log-refresh-label {
+        font-size: 12px;
+        display: flex !important;
+        align-items: center !important; /* 强制容器内容垂直居中 */
+        cursor: pointer;
+        user-select: none;
+        background: rgba(255, 255, 255, 0.15);
+        padding: 0 12px;
+        border-radius: 20px;
+        height: 24px; /* 固定高度，锁定垂直中线 */
+        transition: all 0.3s ease;
+    }
+
+    .cf-log-refresh-label:has(input:checked) {
+        background: rgba(255, 255, 255, 0.3);
+        animation: cf-glow-pulse 2s infinite ease-in-out;
+    }
+
+    @keyframes cf-glow-pulse {
+        0% { box-shadow: 0 0 2px rgba(255, 255, 255, 0.2); }
+        50% { box-shadow: 0 0 8px rgba(255, 255, 255, 0.5); }
+        100% { box-shadow: 0 0 2px rgba(255, 255, 255, 0.2); }
+    }
+
+    /* 核心修复：复选框定位 */
+    .cf-log-refresh-label input[type="checkbox"] {
+        appearance: checkbox !important;
+        -webkit-appearance: checkbox !important;
+        margin: 0 6px 0 0 !important; /* 只有右边距 */
+        padding: 0 !important;
+        width: 14px !important;
+        height: 14px !important;
+        flex-shrink: 0;
+        position: relative;
+        top: 1px; /* 关键：手动下移 1px，补偿中文字体基线偏低的问题 */
+    }
+
+    .cf-log-refresh-label span {
+        line-height: 1 !important; /* 强制行高为 1，消除额外留白 */
+        color: #ffffff;
+        font-weight: 500;
+        display: inline-block;
+    }
+
+    /* 4. 日志文本框 */
+    #logview {
+        width: 100%;
+        font-family: 'Fira Code', 'Cascadia Code', 'Courier New', monospace;
+        font-size: 14px; 
+        line-height: 1.7; 
+        color: #d4d4d4;
+        background: transparent; 
+        padding: 18px; 
+        border: none;
+        outline: none;
+        resize: none;
+        display: block;
+        box-shadow: inset 0 2px 15px rgba(0,0,0,0.4);
+        scrollbar-width: thin;
+        scrollbar-color: #475569 #1a1a1a;
+
+        -webkit-mask-image: linear-gradient(
+            to bottom,
+            transparent 0%,
+            black 18px,
+            black calc(100% - 18px),
+            transparent 100%
+        );
+        mask-image: linear-gradient(
+            to bottom,
+            transparent 0%,
+            black 18px,
+            black calc(100% - 18px),
+            transparent 100%
+        );
+    }
+
+    #logview::-webkit-scrollbar { width: 8px; }
+    #logview::-webkit-scrollbar-track { background: transparent; }
+    #logview::-webkit-scrollbar-thumb {
+        background-color: #475569;
+        border-radius: 10px;
+        border: 2px solid #1a1a1a;
+    }
+</style>
+
+<div class="cf-log-dashboard" id="cf_log_container">
+    <div class="cf-log-header">
+        <div class="cf-log-title"><%:测速运行日志%></div>
+        <label class="cf-log-refresh-label" for="checkbox1">
+            <input type="checkbox" id="checkbox1" checked onchange="updateDashboardBg()"> 
+            <span><%:自动刷新%></span>
+        </label>
+    </div>
+
+    <textarea id="logview" 
+        rows="30" 
+        readonly="readonly" 
+        placeholder="<%:等待日志流输入...%>"></textarea>
+</div>
 
 <script type="text/javascript">
-    // 后端获取日志的URL
     const LOG_URL = '<%=luci.dispatcher.build_url("admin", "services", "cloudflarespeedtest","getlog")%>';
     const logview = document.getElementById('logview');
+    const dashboard = document.getElementById('cf_log_container');
+    const refreshToggle = document.getElementById('checkbox1');
 
-    /**
-     * 格式化原始日志字符串的函数
-     */
+    function updateDashboardBg() {
+        if (refreshToggle && refreshToggle.checked) {
+            dashboard.classList.add('active-refresh');
+        } else if (dashboard) {
+            dashboard.classList.remove('active-refresh');
+        }
+    }
+
     function formatLog(rawLog) {
-        if (!rawLog) {
+        if (!rawLog || rawLog.trim() === "") {
             return '【系统提示】正在等待日志生成...';
         }
 
         let formatted = rawLog;
 
-        // 1. 在“开始下载测速”前强制换行
+        formatted = formatted.replace(/\[([-↗↘↙↖_]+)\]/g, function(match, p1) {
+            let cleanBar = p1.replace(/[↗↘↙↖-]/g, '█').replace(/_/g, '░');
+            return ' ' + cleanBar + ' '; 
+        });
+
+        formatted = formatted.replace(/([^\n])(\s*(\x1b\[\d+m)?\[信息\])/g, '$1\n$2');
         formatted = formatted.replace(/([^\n])(\s*(\x1b\[\d+m)?开始下载测速)/g, '$1\n$2');
-
-        // 2. 在测速结果表格标题“IP 地址”前强制换行
         formatted = formatted.replace(/([^\n])(\s*(\x1b\[\d+m)?IP 地址)/g, '$1\n$2');
-
-        // 3. 处理进度条：在每一个新的进度更新点前插入换行符
-        formatted = formatted.replace(/(\d+\s\/\s\d+\s\[)/g, '\n$1');
-
-        // 4. 清理所有 ANSI 转义序列
+        formatted = formatted.replace(/(\d+\s+\/\s+\d+\s+)/g, '\n$1');
         formatted = formatted.replace(/\x1b\[[0-9;]*[mGKH]/g, '');
 
-        // 5. 统一处理换行符并分割成行数组
-        const lines = formatted.split(/\r?\n/);
-
-        // 6. 清理每行多余空格并过滤空行
-        const processedLines = lines
-            .map(line => line.trim())
-            .filter(line => line.length > 0);
-
-        // 7. 性能保护：防止日志堆积过大
-        if (processedLines.length > 5000) {
-            return "......（日志过长，已自动截取末尾部分）......\n" + processedLines.slice(-5000).join('\n');
+        const rawLines = formatted.split(/\r?\n/).map(l => l.trim()).filter(l => l !== "");
+        let finalLines = [];
+        for (let i = 0; i < rawLines.length; i++) {
+            const currentLine = rawLines[i];
+            const nextLine = rawLines[i + 1];
+            const isCurrentProgress = currentLine.includes('█') || currentLine.includes('░');
+            const isNextProgress = nextLine ? (nextLine.includes('█') || nextLine.includes('░')) : false;
+            if (isCurrentProgress && isNextProgress) continue; 
+            finalLines.push(currentLine);
         }
 
-        return processedLines.join('\n');
+        const MAX_LINES = 2000;
+        if (finalLines.length > MAX_LINES) {
+            return "......（日志过长，已自动截取末尾）......\n" + finalLines.slice(-MAX_LINES).join('\n');
+        }
+
+        return finalLines.join('\n');
     }
 
-    /**
-     * 执行 XHR 请求获取日志
-     */
     function getlog() {
         XHR.get(LOG_URL, null, function(x, data) {
-            if (data && typeof data.log === 'string') {
+            if (data && typeof data.log === 'string' && data.log.trim() !== "") {
                 const cleanText = formatLog(data.log);
-                
                 if (logview.value !== cleanText) {
                     logview.value = cleanText;
-                    
-                    // 自动滚动到底部
-                    if (document.getElementById("checkbox1").checked) {
+                    if (refreshToggle && refreshToggle.checked) {
                         logview.scrollTop = logview.scrollHeight;
                     }
                 }
@@ -69,14 +211,14 @@
         });
     }
 
-    // 初始加载
+    updateDashboardBg();
     getlog();
-
-    // 定时刷新
+    
     setInterval(() => {
-        if (document.getElementById("checkbox1").checked === true) {
+        if (refreshToggle && refreshToggle.checked) {
             getlog();
         }
     }, 2000);
 </script>
+
 <%+cbi/valuefooter%>
