@@ -1,384 +1,270 @@
+-- [[ Cloudflare Speed Test - 看板化深度美化版 (方案 B 定时器对齐优化) ]] --
 require("luci.sys")
-
 local uci = luci.model.uci.cursor()
 
-m = Map('cloudflarespeedtest')
-m.title = translate('Cloudflare Speed Test')
-m.description = '<a href=\"https://github.com/mingxiaoyu/luci-app-cloudflarespeedtest\" target=\"_blank\">GitHub</a>'
+m = Map("cloudflarespeedtest")
 
--- [[ 基本设置 ]]--
+-- 1. 标题：项目地址链接与动态图标联动
+m.title = [[<a href="https://github.com/mingxiaoyu/luci-app-cloudflarespeedtest" target="_blank" style="text-decoration: none; color: inherit; display: inline-flex; align-items: center;">]] .. 
+          translate("Cloudflare 自动优选 IP") .. 
+          [[<span style="margin-left: 6px; font-size: 0.9em; transition: opacity 0.2s; opacity: 0.6;" onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=0.6;">🔗</span></a>]]
 
-s = m:section(NamedSection, 'global')
-s.addremove = false
+-- 2. 描述：看板化提示框样式
+m.description = [[
+<div style="margin-top: 10px; padding: 12px 16px; background-color: #ebf5ff; border-left: 4px solid #3b82f6; border-radius: 8px; color: #1e40af; font-size: 13px; line-height: 1.6; box-shadow: 0 2px 4px rgba(0,0,0,0.05);">
+    <strong style="display: block; margin-bottom: 4px; font-size: 14px;">💡 功能介绍</strong>
+    自动测试 Cloudflare 节点延迟与速度，并将最优结果同步至相关插件或 DNS 记录。访问 
+    <a href="https://github.com/mingxiaoyu/luci-app-cloudflarespeedtest" target="_blank" style="color: #2563eb; text-decoration: underline; font-weight: bold;">GitHub 项目主页</a>
+</div>
+]]
+
+-- ---------------------------------------------------------
+-- 1. 核心样式注入
+-- ---------------------------------------------------------
+local style_injector = m:section(TypedSection, "global")
+style_injector.anonymous = true
+
+o = style_injector:option(DummyValue, "_style_fix")
+o.rawhtml = true
+o.value = [[
+<style>
+    .cbi-map-descr {padding: 0 16px !important;}
+    /* 1. 状态控制栏修复 */
+    div[id$="-_actions"].cbi-value {
+        display: flex !important;
+        align-items: center !important;
+        flex-wrap: nowrap !important;
+        padding: 15px 0 !important;
+        border-bottom: 1px solid rgba(0,0,0,0.05) !important;
+    }
+    div[id$="-_actions"] .cbi-value-title {
+        flex: 0 0 100px !important;
+        width: 100px !important;
+        margin: 0 !important;
+        text-align: right !important;
+        padding-right: 15px !important;
+        font-weight: bold !important;
+        color: #4b5563 !important;
+        float: none !important;
+    }
+    div[id$="-_actions"] .cbi-value-field {
+        flex: 0 0 auto !important;
+        margin: 0 !important;
+        padding: 0 10px 0 0 !important;
+        display: flex !important;
+        align-items: center !important;
+        float: none !important;
+    }
+
+    /* 2. 定时任务行内显示核心优化 (修复换行问题) */
+    /* 强制字段区域采用水平排列 */
+    div[id$="-hour"] .cbi-value-field, 
+    div[id$="-minute"] .cbi-value-field {
+        display: flex !important;
+        align-items: center !important;
+        flex-wrap: nowrap !important;
+    }
+
+    /* 强制移除破坏布局的 <br> 换行标签 */
+    div[id$="-hour"] .cbi-value-field br, 
+    div[id$="-minute"] .cbi-value-field br {
+        display: none !important;
+    }
+
+    /* 将描述文字强制改为行内块，并设置间距 */
+    div[id$="-hour"] .cbi-value-description, 
+    div[id$="-minute"] .cbi-value-description {
+        display: inline-block !important;
+        margin: 0 0 0 12px !important;
+        padding: 0 !important;
+        white-space: nowrap !important;
+        font-size: 13px !important;
+        color: #94a3b8 !important;
+    }
+
+    /* 输入框物理限宽 */
+    div[id$="-hour"] input, 
+    div[id$="-minute"] input {
+        width: 100px !important;
+        min-width: 100px !important;
+        text-align: center !important;
+        margin: 0 !important;
+    }
+
+    /* 3. 看板表格美化 */
+    div[id$="-syipstext"].cbi-value .cbi-value-title { display: none !important; }
+    div[id$="-syipstext"].cbi-value .cbi-value-field { width: 100% !important; margin: 0 !important; padding: 0 !important; }
+
+    .cf-dashboard {
+        width: 100%;
+        background: #fff;
+        border-radius: 12px;
+        border: 1px solid #e2e8f0;
+        overflow: hidden;
+        box-shadow: 0 4px 20px rgba(0,0,0,0.06);
+        margin: 10px 0 25px 0;
+    }
+    .cf-db-header {
+        background: #3b82f6;
+        color: #ffffff;
+        padding: 10px 16px;
+        font-weight: bold;
+        display: flex;
+        align-items: center;
+        font-size: 14px;
+    }
+    .cf-db-header::before { content: "📊"; margin-right: 8px; }
+    .cf-st-table { width: 100%; border-collapse: collapse; }
+    .cf-st-table th { background: #f8fafc; color: #64748b; font-weight: 600; padding: 12px; text-align: center; border-bottom: 2px solid #f1f5f9; font-size: 12px; }
+    .cf-st-table td { padding: 12px; border-bottom: 1px solid #f1f5f9; text-align: center; font-size: 13px; color: #334155; }
+    .cf-st-table tr:hover { background-color: #f1f5f9; transition: 0.2s; }
+    
+    .ip-badge { font-family: "SFMono-Regular", Consolas, monospace; color: #2563eb; background: #eff6ff; padding: 2px 8px; border-radius: 4px; font-weight: 600; border: 1px solid #dbeafe; }
+    .speed-badge { background: #dcfce7; color: #166534; padding: 2px 10px; border-radius: 20px; font-weight: bold; font-size: 12px; }
+</style>
+]]
+
+-- ---------------------------------------------------------
+-- 2. 运行控制中心
+-- ---------------------------------------------------------
+s = m:section(NamedSection, "global", "section", translate("运行控制中心"))
 s.anonymous = true
 
-o=s:option(Flag,"enabled",translate("Enabled"))
-o.description = translate("Enabled scheduled task test Cloudflare IP")
-o.rmempty=false
-o.default = 0
-
-o=s:option(Flag,"ipv6_enabled",translate("IPv6 Enabled"))
-o.description = translate("Provides only one method, if IPv6 is enabled, IPv4 will not be tested")
-o.default = 0
-o.rmempty=false
-
-o=s:option(Value,"speed",translate("Broadband speed"))
-o.description =translate("100M broadband download speed is about 12M/s. It is not recommended to fill in an excessively large value, and it may run all the time.");
-o.datatype ="uinteger"
-o.rmempty=false
-
-o=s:option(Value,"custome_url",translate("Custome Url"))
-o.description = translate("<a href=\"https://github.com/XIU2/CloudflareSpeedTest/issues/168\" target=\"_blank\">How to create</a>")
-o.rmempty=false
-
-o=s:option(Flag,"custome_cors_enabled",translate("Custome Cron Enabled"))
-o.default = 0
-o.rmempty=false
-
-o = s:option(Value, "custome_cron", translate("Custome Cron"))
-o:depends("custome_cors_enabled", 1)
-
-hour = s:option(Value, "hour", translate("Hour"))
-hour.datatype = "range(0,23)"
-hour:depends("custome_cors_enabled", 0)
-
-minute = s:option(Value, "minute", translate("Minute"))
-minute.datatype = "range(0,59)"
-minute:depends("custome_cors_enabled", 0)
-
-o = s:option(ListValue, "proxy_mode", translate("Proxy Mode"))
-o:value("nil", translate("HOLD"))
-o.description = translate("during the speed testing, swith to which mode")
-o:value("gfw", translate("GFW List"))
-o:value("close", translate("CLOSE"))
-o.default = "gfw"
-
-o=s:option(Flag,"advanced",translate("Advanced"))
-o.description = translate("Not recommended")
-o.default = 0
-o.rmempty=false
-
-o = s:option(Value, "threads", translate("Thread"))
-o.datatype ="uinteger"
-o.default = 200
-o.rmempty=true
-o:depends("advanced", 1)
-
-o = s:option(Value, "tl", translate("Average Latency Cap"))
-o.datatype ="uinteger"
-o.default = 200
-o.rmempty=true
-o:depends("advanced", 1)
-
-o = s:option(Value, "tll", translate("Average Latency Lower Bound"))
-o.datatype ="uinteger"
-o.default = 40
-o.rmempty=true
-o:depends("advanced", 1)
-
-o = s:option(Value, "t", translate("Delayed speed measurement time"))
-o.datatype ="uinteger"
-o.default = 4
-o.rmempty=true
-o:depends("advanced", 1)
-
-o = s:option(Value, "dt", translate("Download speed test time"))
-o.datatype ="uinteger"
-o.default = 10
-o.rmempty=true
-o:depends("advanced", 1)
-
-o = s:option(Value, "dn", translate("Number of download speed tests"))
-o.datatype ="uinteger"
-o.default = 1
-o.rmempty=true
-o:depends("advanced", 1)
-
-o = s:option(Flag, "dd", translate("Disable download speed test"))
-o.default = 0
-o.rmempty=true
-o:depends("advanced", 1)
-
-o = s:option(Value, "tp", translate("Port"))
-o.rmempty=true
-o.default = 443
-o.datatype ="port"
-o:depends("advanced", 1)
-
-o = s:option(DummyValue, '', '')
+o = s:option(DummyValue, "_actions")
 o.rawhtml = true
 o.template = "cloudflarespeedtest/actions"
 
-s = m:section(NamedSection, "servers", "section", translate("Third party applications settings"))
-
-if nixio.fs.access("/etc/config/shadowsocksr") then
-	s:tab("ssr", translate("Shadowsocksr Plus+"))
-
-	o=s:taboption("ssr", Flag, "ssr_enabled",translate("Shadowsocksr Plus+ Enabled"))
-	o.rmempty=true
-
-	local ssr_server_table = {}
-	uci:foreach("shadowsocksr", "servers", function(s)
-		if s.alias then
-			ssr_server_table[s[".name"]] = "[%s]:%s" % {string.upper(s.v2ray_protocol or s.type), s.alias}
-		elseif s.server and s.server_port then
-			ssr_server_table[s[".name"]] = "[%s]:%s:%s" % {string.upper(s.v2ray_protocol or s.type), s.server, s.server_port}
-		end
-	end)
-
-	local ssr_key_table = {}
-	for key, _ in pairs(ssr_server_table) do
-		table.insert(ssr_key_table, key)
-	end
-
-	table.sort(ssr_key_table)
-
-	o = s:taboption("ssr", DynamicList, "ssr_services",
-			translate("Shadowsocksr Servers"),
-			translate("Please select a service"))
-
-	for _, key in pairs(ssr_key_table) do
-		o:value(key, ssr_server_table[key])
-	end
-	o:depends("ssr_enabled", 1)
-	o.forcewrite = true
-
-end
-
-
-if nixio.fs.access("/etc/config/passwall") then
-	s:tab("passwalltab", translate("passwall"))
-
-	o=s:taboption("passwalltab", Flag, "passwall_enabled",translate("Passwall Enabled"))
-	o.rmempty=true
-
-	local passwall_server_table = {}
-	uci:foreach("passwall", "nodes", function(s)
-		if s.remarks then
-			passwall_server_table[s[".name"]] = "[%s]:%s" % {string.upper(s.protocol or s.type), s.remarks}
-		end
-	end)
-
-	local passwall_key_table = {}
-	for key, _ in pairs(passwall_server_table) do
-		table.insert(passwall_key_table, key)
-	end
-
-	table.sort(passwall_key_table)
-
-	o = s:taboption("passwalltab", DynamicList, "passwall_services",
-			translate("Passwall Servers"),
-			translate("Please select a service"))
-
-	for _, key in pairs(passwall_key_table) do
-		o:value(key, passwall_server_table[key])
-	end
-	o:depends("passwall_enabled", 1)
-	o.forcewrite = true
-
-end
-
-if nixio.fs.access("/etc/config/passwall2") then
-	s:tab("passwall2tab", translate("passwall2"))
-
-	o=s:taboption("passwall2tab", Flag, "passwall2_enabled",translate("PassWall2 Enabled"))
-	o.rmempty=true
-
-	local passwall2_server_table = {}
-	uci:foreach("passwall2", "nodes", function(s)
-		if s.remarks then
-			passwall2_server_table[s[".name"]] = "[%s]:%s" % {string.upper(s.protocol or s.type), s.remarks}
-		end
-	end)
-
-	local passwall2_key_table = {}
-	for key, _ in pairs(passwall2_server_table) do
-		table.insert(passwall2_key_table, key)
-	end
-
-	table.sort(passwall2_key_table)
-
-	o = s:taboption("passwall2tab", DynamicList, "passwall2_services",
-			translate("Passwall2 Servers"),
-			translate("Please select a service"))
-
-	for _, key in pairs(passwall2_key_table) do
-		o:value(key, passwall2_server_table[key])
-	end
-	o:depends("passwall2_enabled", 1)
-	o.forcewrite = true
-
-end
-
-s:tab("bypasstab", translate("Bypass"))
-if nixio.fs.access("/etc/config/bypass") then
-
-	o=s:taboption("bypasstab", Flag, "bypass_enabled",translate("Bypass Enabled"))
-	o.rmempty=true
-
-	local bypass_server_table = {}
-	uci:foreach("bypass", "servers", function(s)
-		if s.alias then
-			bypass_server_table[s[".name"]] = "[%s]:%s" % {string.upper(s.protocol or s.type), s.alias}
-		elseif s.server and s.server_port then
-			bypass_server_table[s[".name"]] = "[%s]:%s:%s" % {string.upper(s.protocol or s.type), s.server, s.server_port}
-		end
-	end)
-
-	local bypass_key_table = {}
-	for key, _ in pairs(bypass_server_table) do
-		table.insert(bypass_key_table, key)
-	end
-
-	table.sort(bypass_key_table)
-
-	o = s:taboption("bypasstab", DynamicList, "bypass_services",
-			translate("Bypass Servers"),
-			translate("Please select a service"))
-
-	for _, key in pairs(bypass_key_table) do
-		o:value(key, bypass_server_table[key])
-	end
-	o:depends("bypass_enabled", 1)
-	o.forcewrite = true
-
-end
-
-s:tab("vssrtab", translate("Vssr"))
-if nixio.fs.access("/etc/config/vssr") then
-
-	o=s:taboption("vssrtab", Flag, "vssr_enabled",translate("Vssr Enabled"))
-	o.rmempty=true
-
-	local vssr_server_table = {}
-	uci:foreach("vssr", "servers", function(s)
-		if s.alias then
-			vssr_server_table[s[".name"]] = "[%s]:%s" % {string.upper(s.protocol or s.type), s.alias}
-		elseif s.server and s.server_port then
-			vssr_server_table[s[".name"]] = "[%s]:%s:%s" % {string.upper(s.protocol or s.type), s.server, s.server_port}
-		end
-	end)
-
-	local vssr_key_table = {}
-	for key, _ in pairs(vssr_server_table) do
-		table.insert(vssr_key_table, key)
-	end
-
-	table.sort(vssr_key_table)
-
-	o = s:taboption("vssrtab", DynamicList, "vssr_services",
-			translate("Vssr Servers"),
-			translate("Please select a service"))
-
-	for _, key in pairs(vssr_key_table) do
-		o:value(key, vssr_server_table[key])
-	end
-	o:depends("vssr_enabled", 1)
-	o.forcewrite = true
-
-end
-
-s:tab("dnstab", translate("DNS"))
-
-o=s:taboption("dnstab", Flag, "DNS_enabled",translate("DNS Enabled"))
-
-o=s:taboption("dnstab", ListValue, "DNS_type", translate("DNS Type"))
-o:value("aliyu", translate("AliyuDNS"))
-o:depends("DNS_enabled", 1)
-
-o=s:taboption("dnstab", Value,"app_key",translate("Access Key ID"))
-o.rmempty=true
-o:depends("DNS_enabled", 1)
-o=s:taboption("dnstab", Value,"app_secret",translate("Access Key Secret"))
-o.rmempty=true
-o:depends("DNS_enabled", 1)
-
-o=s:taboption("dnstab", Value,"main_domain",translate("Main Domain"),translate("For example: test.github.com -> github.com"))
-o.rmempty=true
-o:depends("DNS_enabled", 1)
-o=s:taboption("dnstab", DynamicList,"sub_domain",translate("Sub Domain"),translate("For example: test.github.com -> test"))
-o.rmempty=true
-o:depends("DNS_enabled", 1)
-
-o=s:taboption("dnstab", ListValue, "line", translate("Lines"))
-o:value("default", translate("default"))
-o:value("telecom", translate("telecom"))
-o:value("unicom", translate("unicom"))
-o:value("mobile", translate("mobile"))
-o:depends("DNS_enabled", 1)
-o.default ="telecom"
-
-s:tab("dnshost", translate("HOST"))
-o=s:taboption("dnshost", Flag, "HOST_enabled",translate("HOST Enabled"))
-o=s:taboption("dnshost", Value,"host_domain",translate("Domain"))
-o.rmempty=true
-o:depends("HOST_enabled", 1)
-
-s:tab("mosdns", translate("MosDNS"))
-o=s:taboption("mosdns", Flag, "MosDNS_enabled",translate("MosDNS Enabled"))
-o=s:taboption("mosdns", Flag, "openclash_restart",translate("OpenClash Restart"))
-o:depends("MosDNS_enabled", 1)
-
--- [[ 最佳 IP 显示部分 ]] --
-e = m:section(TypedSection, "global", translate("Best IP"))
-e.anonymous = true
-
--- 使用 DummyValue 来承载 HTML 内容
-tvIPs = e:option(DummyValue, "syipstext")
+tvIPs = s:option(DummyValue, "syipstext")
 tvIPs.rawhtml = true
-
 function tvIPs.cfgvalue(self, section)
     local file_path = "/usr/share/cloudflarespeedtestresult.txt"
-    local html = ""
-    
-    -- 尝试打开结果文件
     local f = io.open(file_path, "r")
-    if f then
-        -- 读取第一行（标题行）
-        local header = f:read("*l")
-        if header then
-            -- 构建表格样式和头部
-            html = [[
-<div style="overflow-x:auto; background-color: #f9f9f9; padding: 10px; border-radius: 4px; border: 1px solid #ddd;">
-    <table class="cbi-section-table" style="width:100%; margin:0; font-size:12px; text-align:center; border-collapse: collapse;">
-        <tr class="cbi-section-table-titles" style="background-color: #eee; height: 30px;">
-]]
-            -- 解析标题 (CSV 逗号分隔)
-            for col in header:gmatch("([^,]+)") do
-                html = html .. string.format('<th class="cbi-section-table-cell" style="padding: 4px 8px; border-bottom: 2px solid #ccc;">%s</th>', luci.util.pcdata(col))
-            end
-            html = html .. "</tr>"
-
-            -- 读取数据行（最多显示前 10 条最佳结果，防止页面过长）
-            local count = 0
-            for line in f:lines() do
-                if count >= 10 then break end
-                html = html .. '<tr class="cbi-section-table-row" style="height: 28px; border-bottom: 1px solid #eee;">'
-                
-                -- 解析每一列数据
-                for col in line:gmatch("([^,]+)") do
-                    -- 针对 IP 地址列做换行处理，防止 IPv6 撑开表格
-                    local style = (col:find(":") or #col > 16) and 'style="word-break: break-all; min-width: 120px;"' or ""
-                    html = html .. string.format('<td class="cbi-section-table-cell" %s>%s</td>', style, luci.util.pcdata(col))
-                end
-                
-                html = html .. "</tr>"
-                count = count + 1
-            end
-            html = html .. "</table></div>"
-        else
-            html = "<em>" .. translate("等待测速结果生成...") .. "</em>"
-        end
-        f:close()
-    else
-        html = "<em>" .. translate("尚未发现测速结果文件。") .. "</em>"
+    if not f then
+        return string.format('<div class="cf-dashboard"><div class="cf-db-header">%s</div><div style="padding:30px; text-align:center; color:#94a3b8;">%s</div></div>', 
+            translate("IP 优选看板"), translate("暂无测速记录，请点击上方按钮开始执行。"))
     end
-    
-    -- 添加一个自动刷新提示或最后更新时间（可选）
-    return html
+    local header = f:read("*l")
+    if not header then f:close() return "" end
+    local html = '<div class="cf-dashboard"><div class="cf-db-header">' .. translate("IP 优选看板 (Top 8 最佳结果)") .. '</div><table class="cf-st-table"><thead><tr>'
+    for col in header:gmatch("([^,]+)") do html = html .. string.format('<th>%s</th>', luci.util.pcdata(col)) end
+    html = html .. "</tr></thead><tbody>"
+    local count = 0
+    for line in f:lines() do
+        if count >= 8 then break end
+        html = html .. "<tr>"
+        local col_idx = 1
+        for col in line:gmatch("([^,]+)") do
+            local content = luci.util.pcdata(col)
+            if col_idx == 1 then content = string.format('<span class="ip-badge">%s</span>', content)
+            elseif col:find("MB/s") or (tonumber(col) and col_idx >= 5) then content = string.format('<span class="speed-badge">%s</span>', content) end
+            html = html .. string.format('<td>%s</td>', content)
+            col_idx = col_idx + 1
+        end
+        html = html .. "</tr>"
+        count = count + 1
+    end
+    f:close()
+    return html .. "</tbody></table></div>"
 end
 
-tvIPs.write=function(e,e,e)
+-- ---------------------------------------------------------
+-- 3. 核心参数配置
+-- ---------------------------------------------------------
+s = m:section(NamedSection, "global", "section", translate("核心配置参数"))
+s.anonymous = true
+s:tab("basic", translate("基础配置"))
+s:tab("timer", translate("定时任务"))
+s:tab("proxy", translate("环境检测"))
+s:tab("advanced", translate("高级调优"))
+
+-- [ 基础配置 ]
+o = s:taboption("basic", Flag, "enabled", translate("启用定时任务"))
+o.default = 0
+o = s:taboption("basic", Flag, "ipv6_enabled", translate("启用 IPv6 模式"))
+o = s:taboption("basic", Value, "speed", translate("目标速度 (MB/s)"))
+o.datatype = "uinteger"; o.default = 10
+o = s:taboption("basic", Value, "custome_url", translate("自定义测速 URL"))
+
+-- [ 定时任务 - 方案 B 深度对齐版 ]
+o = s:taboption("timer", Flag, "custome_cors_enabled", translate("使用 Cron 表达式"))
+o = s:taboption("timer", Value, "custome_cron", translate("Cron 表达式"))
+o:depends("custome_cors_enabled", 1)
+o.placeholder = "*/30 * * * *"
+
+-- 小时设置
+o = s:taboption("timer", Value, "hour", translate("每日执行时间"))
+o.datatype = "range(0,23)"
+o.description = translate("点 (24小时制)")
+o:depends("custome_cors_enabled", 0)
+
+-- 分钟设置 (引导式)
+o = s:taboption("timer", Value, "minute", translate("└ 细化执行分钟"))
+o.datatype = "range(0,59)"
+o.description = translate("分 (0-59)")
+o:depends("custome_cors_enabled", 0)
+
+-- [ 环境检测 ]
+o = s:taboption("proxy", ListValue, "proxy_mode", translate("测速时代理策略"))
+o:value("nil", translate("保持不变")); o:value("gfw", translate("绕过 GFW 列表")); o:value("close", translate("临时关闭代理"))
+o.default = "gfw"
+
+-- [ 高级调优 ]
+o = s:taboption("advanced", Flag, "advanced", translate("开启高级参数"))
+local pl = { {"threads", "线程 Thread", 200}, {"tl", "平均延迟上限", 200}, {"tll", "平均延迟下限", 50}, {"t", "延迟测速次数", 4}, {"dt", "下载测速时长", 10}, {"dn", "下载测速数量", 1}, {"tp", "指定下载端口", 443} }
+for _, p in ipairs(pl) do
+    o = s:taboption("advanced", Value, p[1], translate(p[2]))
+    o.default = p[3]; o:depends("advanced", 1)
 end
+o = s:taboption("advanced", Flag, "dd", translate("禁用下载测试")); o:depends("advanced", 1)
+
+-- ---------------------------------------------------------
+-- 4. 第三方集成联动
+-- ---------------------------------------------------------
+s = m:section(NamedSection, "servers", "section", translate("应用插件联动"))
+s.description = translate("测速完成后自动更新最优 IP 到以下插件中")
+
+local function add_app(cfg, tid, title, sec, alias, proto)
+    if nixio.fs.access("/etc/config/" .. cfg) then
+        s:tab(tid, title)
+        o = s:taboption(tid, Flag, cfg .. "_enabled", translate("启用同步到 ") .. title)
+        local nodes = {}
+        uci:foreach(cfg, sec, function(n)
+            local label = n[alias] or n.remarks or n.server
+            if label then nodes[n[".name"]] = string.format("[%s] %s", string.upper(n[proto] or n.type or "NODE"), label) end
+        end)
+        local keys = {}
+        for k in pairs(nodes) do table.insert(keys, k) end
+        table.sort(keys)
+        o = s:taboption(tid, DynamicList, cfg .. "_services", translate("目标节点选择"))
+        for _, k in ipairs(keys) do o:value(k, nodes[k]) end
+        o:depends(cfg .. "_enabled", 1)
+    end
+end
+
+add_app("shadowsocksr", "ssr", "SSR Plus+", "servers", "alias", "v2ray_protocol")
+add_app("passwall", "passwall", "Passwall", "nodes", "remarks", "protocol")
+add_app("passwall2", "passwall2", "Passwall2", "nodes", "remarks", "protocol")
+add_app("bypass", "bypass", "Bypass", "servers", "alias", "protocol")
+add_app("vssr", "vssr", "Vssr", "servers", "alias", "protocol")
+
+-- DNS 解析同步
+s:tab("dnstab", translate("DNS 解析"))
+o = s:taboption("dnstab", Flag, "DNS_enabled", translate("启用域名同步"))
+o = s:taboption("dnstab", ListValue, "DNS_type", translate("DNS 服务商"))
+o:value("aliyu", "阿里云 (Aliyun)"); o:depends("DNS_enabled", 1)
+o = s:taboption("dnstab", Value, "app_key", translate("Access Key ID")); o:depends("DNS_enabled", 1)
+o = s:taboption("dnstab", Value, "app_secret", translate("Access Key Secret")); o.password = true; o:depends("DNS_enabled", 1)
+o = s:taboption("dnstab", Value, "main_domain", translate("主域名")); o:depends("DNS_enabled", 1)
+o = s:taboption("dnstab", DynamicList, "sub_domain", translate("子域名记录")); o:depends("DNS_enabled", 1)
+o = s:taboption("dnstab", ListValue, "line", translate("线路选择")); o:value("default", "默认线路"); o:value("telecom", "电信"); o:value("unicom", "联通"); o:value("mobile", "移动"); o:depends("DNS_enabled", 1)
+
+-- HOST/MosDNS 集成
+s:tab("dnshost", translate("HOST 注入"))
+o = s:taboption("dnshost", Flag, "HOST_enabled", translate("启用 HOST 修改"))
+o = s:taboption("dnshost", Value, "host_domain", translate("指定域名")); o:depends("HOST_enabled", 1)
+
+s:tab("mosdns", translate("MosDNS"))
+o = s:taboption("mosdns", Flag, "MosDNS_enabled", translate("启用 MosDNS 同步"))
+o = s:taboption("mosdns", Flag, "openclash_restart", translate("完成后重启 OpenClash")); o:depends("MosDNS_enabled", 1)
 
 return m
